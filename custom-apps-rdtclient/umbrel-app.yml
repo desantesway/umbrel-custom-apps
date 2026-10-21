@@ -1,0 +1,24 @@
+manifestVersion: 1
+id: custom-apps-rdtclient
+category: BigBearCasaOS
+name: RDTClient
+version: "1.0.0"
+tagline: Connect TorBox to Sonarr and Radarr
+description: >-
+  RDTClient provides a download-client interface for TorBox
+  and integrations with Sonarr and Radarr.
+releaseNotes: >-
+  Initial custom UmbrelOS installation.
+developer: rogerfar
+website: https://github.com/rogerfar/rdt-client
+dependencies: []
+repo: https://github.com/rogerfar/rdt-client
+support: https://github.com/rogerfar/rdt-client/issues
+port: 6500
+gallery: []
+path: ""
+defaultUsername: ""
+defaultPassword: ""
+icon: https://raw.githubusercontent.com/homarr-labs/dashboard-icons/main/png/rdt-client.png
+submitter: Custom
+submission: ""

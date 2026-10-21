@@ -1,0 +1,23 @@
+version: "3.7"
+
+services:
+  app_proxy:
+    image: getumbrel/app-proxy:1.0.0
+    restart: on-failure
+    environment:
+      APP_HOST: custom-apps-rdtclient_server_1
+      APP_PORT: "6500"
+
+  server:
+    image: rogerfar/rdtclient:latest
+    restart: unless-stopped
+    stop_grace_period: 1m
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Europe/Lisbon
+    ports:
+      - "6500:6500"
+    volumes:
+      - ${APP_DATA_DIR}/data:/data/db
+      - /home/umbrel/umbrel/home/Downloads:/data/downloads
