@@ -1,0 +1,20 @@
+version: "3.7"
+services:
+  app_proxy:
+    image: getumbrel/app-proxy:1.0.0
+    restart: on-failure
+    environment:
+      APP_HOST: custom-apps-pkvault_server_1
+      APP_PORT: "3000"
+
+  server:
+    image: ghcr.io/chnapy/pkvault:latest
+    restart: unless-stopped
+    stop_grace_period: 1m
+    ports:
+      - "3010:3000"
+    environment:
+      LOG_FILE_COUNT_LIMIT: "10"
+      BACKUP_FILE_COUNT_LIMIT: "30"
+    volumes:
+      - ${APP_DATA_DIR}/data:/pkvault

@@ -1,0 +1,21 @@
+manifestVersion: 1
+id: custom-apps-pkvault
+category: Utilities
+name: PKVault
+version: "1.0.0"
+tagline: Pokémon save manager and Pokédex
+description: >-
+  Manage Pokémon saves, storage boxes, transfers, and Pokédex data
+  through a self-hosted web application.
+releaseNotes: Initial release in this community app store.
+developer: Chnapy
+website: https://github.com/Chnapy/PKVault
+dependencies: []
+repo: https://github.com/Chnapy/PKVault
+support: https://github.com/Chnapy/PKVault/issues
+port: 3010
+gallery: []
+path: ""
+defaultUsername: ""
+defaultPassword: ""
+icon: https://raw.githubusercontent.com/Chnapy/PKVault/main/frontend/public/logo.svg
