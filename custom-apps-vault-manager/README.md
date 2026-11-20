@@ -1,28 +1,18 @@
-# Vault Manager — Umbrel custom app
+# Vault Manager — remove the unexpected app-password prompt
 
-This app folder follows the naming and layout used by the other apps in this
-custom app store: `custom-apps-vault-manager/`.
+This revision removes the extra dashboard sign-in screen. The earlier package expected an `APP_PASSWORD` environment variable that was never configured by your Umbrel app installation, so it could not know a password you had chosen.
 
-## Image prerequisite
+The app now opens directly through Umbrel's app proxy. Each encrypted vault still has its own password, entered when creating and unlocking that vault. This does not remove encryption from vault contents.
 
-The Compose file expects `ghcr.io/desantesway/vault-manager:1.0.0`.
-Build this folder's Dockerfile and publish that image to GitHub Container
-Registry before installing the app. Uploading this source folder to the app
-store does not build or publish the container image.
+## Update steps
 
-## External drive
+1. Replace the contents of `custom-apps-vault-manager/` in your GitHub repository with this folder.
+2. Commit the changes.
+3. Replace `.github/workflows/publish-vault-manager.yml` with the workflow included in this ZIP.
+4. Run the GitHub Actions workflow and wait for a successful build.
+5. Ensure the GHCR package is Public.
+6. Update/reinstall Vault Manager from your Umbrel custom app store.
 
-The app expects the Toshiba drive's Vault folder at:
+The app version and image tag are bumped to `1.0.1` so Umbrel pulls the new image.
 
-`/home/umbrel/umbrel/external/TOSHIBA HDW/Vault`
-
-Unlocked FUSE mounts are created under its `Unlocked/` subfolder.
-
-The container requires `/dev/fuse`, `SYS_ADMIN`, `apparmor:unconfined`, and
-shared mount propagation. This is elevated access. Keep the app private and
-do not expose it directly to the public internet. Test with disposable data
-first, and keep recovery keys somewhere separate from the external drive.
-Lock vaults before stopping the app or unplugging the disk.
-
-The web UI uses the Umbrel app password (`APP_PASSWORD`). Each vault has its
-own password, which the app does not persist.
+Important: this removes the separate app login. Access is expected to be protected by Umbrel's own authenticated app proxy. Do not expose the app's container port directly to the internet.

@@ -9,8 +9,6 @@ UNLOCKED = ROOT / "Unlocked"
 DATA = Path(os.environ.get("APP_DATA_DIR", "/data"))
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 PORT = int(os.environ.get("PORT", "8088"))
-if not APP_PASSWORD:
-    raise RuntimeError("APP_PASSWORD is required.")
 DATA.mkdir(parents=True, exist_ok=True)
 secret_file = DATA / "session-secret"
 if not secret_file.exists():
@@ -42,14 +40,10 @@ a{color:#a9ceff;text-decoration:none}a:hover{text-decoration:underline}.path{ove
 .file{display:flex;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid #304257;overflow-wrap:anywhere}
 pre{white-space:pre-wrap;overflow-wrap:anywhere;background:#0b141e;padding:14px;border-radius:9px}
 </style></head><body><main><div class="head"><div><h1>🔐 Vault Manager</h1><small>Encrypted storage on your Toshiba drive</small></div>
-{% if logged %}<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{csrf}}"><button class="secondary">Log out</button></form>{% endif %}</div>
+</div>
 {% for m in get_flashed_messages() %}<div class="flash">{{m}}</div>{% endfor %}{{body|safe}}</main></body></html>
 """
 HOME = r"""
-{% if not logged %}<section class="card"><h2>Sign in</h2><form method="post" action="/login">
-<input type="hidden" name="csrf" value="{{csrf}}"><label>Umbrel app password</label>
-<input type="password" name="password" required autofocus><button>Sign in</button></form></section>
-{% else %}
 <section class="card"><h2>Create encrypted vault</h2><form method="post" action="/create">
 <input type="hidden" name="csrf" value="{{csrf}}"><label>Vault name</label>
 <input name="name" pattern="[A-Za-z0-9_-]{1,48}" placeholder="Personal" required>
@@ -63,9 +57,8 @@ HOME = r"""
 <label>Vault password</label><input type="password" name="password" required><button>Unlock</button></form>{% endif %}
 </div>{% endfor %}</div>{% else %}<p class="muted">No vaults yet.</p>{% endif %}</section>
 <section class="card"><h2>Storage</h2><small>Encrypted vaults</small><div class="path">{{root}}</div>
-<small>Unlocked mounts</small><div class="path">{{unlocked}}</div></section>{% endif %}
-"""
-BROWSE = r"""
+<small>Unlocked mounts</small><div class="path">{{unlocked}}</div></section>
+"""BROWSE = r"""
 <section class="card"><p><a href="/">← All vaults</a></p><div class="row"><h2>📂 {{name}}</h2>
 <form method="post" action="/lock/{{name}}"><input type="hidden" name="csrf" value="{{csrf}}"><button class="danger">Lock vault</button></form></div>
 <small>/{{relative}}</small>{% if parent is not none %}<p><a href="/browse/{{name}}?path={{parent|urlencode}}">← Parent folder</a></p>{% endif %}
@@ -79,10 +72,6 @@ def token():
     return session["csrf"]
 @app.before_request
 def request_guards():
-    # Require dashboard authentication for every endpoint except the login page
-    # and root (which intentionally renders the sign-in form).
-    if request.endpoint not in ("home", "login", "static") and not session.get("logged"):
-        return redirect(url_for("home"))
     if request.method == "POST":
         if not session.get("csrf") or not hmac.compare_digest(session["csrf"], request.form.get("csrf", "")):
             abort(400)
@@ -97,16 +86,8 @@ def home():
         for p in sorted(ROOT.iterdir()):
             if p.is_dir() and p.name!="Unlocked" and (p/"gocryptfs.conf").is_file():
                 vaults.append({"name":p.name,"open":mounted(UNLOCKED/p.name)})
-    return page(render_template_string(HOME,logged=session.get("logged",False),csrf=token(),
+    return page(render_template_string(HOME,logged=True,csrf=token(),
         vaults=vaults,root=str(ROOT),unlocked=str(UNLOCKED)))
-@app.post("/login")
-def login():
-    if hmac.compare_digest(request.form.get("password",""),APP_PASSWORD):
-        session.clear(); session["logged"]=True; session["csrf"]=secrets.token_urlsafe(24)
-    else: flash("Incorrect app password.")
-    return redirect("/")
-@app.post("/logout")
-def logout(): session.clear(); return redirect("/")
 @app.post("/create")
 def create():
     n,pw=request.form.get("name",""),request.form.get("password","")
