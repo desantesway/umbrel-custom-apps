@@ -1,5 +1,22 @@
-# Vault Manager 1.0.4
+# Vault Manager 1.0.5 — stale FUSE mount fix
 
-Adds a vault storage-folder selector and permanent deletion for locked vaults. Vaults can be stored in subfolders under `/vault`; unlocked mounts mirror their relative paths under `/vault/Unlocked`. Delete requires the vault to be locked and the user to type `DELETE`. Deletion permanently removes the encrypted vault data.
+Fixes the dashboard Internal Server Error caused by `location_options()` recursively scanning `Vault/Unlocked` and calling `stat()` on a disconnected FUSE mount (OSError 107: Transport endpoint is not connected).
 
-Update by replacing the app folder and workflow in your repository, committing, running GitHub Actions, and updating the app in Umbrel. Keep backups of encrypted vaults and recovery keys.
+The location picker now deliberately skips the entire `Unlocked` tree and catches filesystem errors while enumerating storage folders. Existing encrypted vault data and vault locations are not migrated or modified.
+
+## Update
+
+1. Replace `custom-apps-vault-manager/` in your GitHub repository with this folder.
+2. Replace `.github/workflows/publish-vault-manager.yml` with the included workflow.
+3. Commit, then run **Actions → Publish Vault Manager image**.
+4. Wait for success and update/reinstall the app in Umbrel.
+
+The image tag and app version are `1.0.5` and the workflow builds both `linux/amd64` and `linux/arm64`.
+
+## If the old disconnected mount remains
+
+After the new version is running, if the `Person` mount still reports a transport endpoint error, try detaching only that stale mount from inside the container:
+
+`sudo docker exec custom-apps-vault-manager_server_1 fusermount3 -uz /vault/Unlocked/Person`
+
+Do not delete the encrypted `Person` directory under `/vault`; it contains the encrypted vault data.

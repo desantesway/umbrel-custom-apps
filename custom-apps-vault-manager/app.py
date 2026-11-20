@@ -106,12 +106,35 @@ def vault_records():
         if valid_key(key): records.append({"key":key,"name":conf.parent.name,"location":str(rel.parent) if str(rel.parent)!="." else "Root","open":mounted(mount_path(key))})
     return sorted(records,key=lambda x:x["key"].lower())
 def location_options():
+    # Do not traverse Unlocked: it contains FUSE mountpoints. A disconnected
+    # gocryptfs mount can raise ENOTCONN/EIO during stat(), breaking the home page.
     opts=[""]
-    for p in ROOT.rglob("*"):
-        if p.is_dir() and not p.is_symlink() and p != UNLOCKED and UNLOCKED not in p.parents:
-            rel=p.relative_to(ROOT).as_posix()
-            if valid_key(rel): opts.append(rel)
-    return opts
+    try:
+        for current, dirs, _files in os.walk(ROOT, topdown=True, followlinks=False):
+            current_path = Path(current)
+            kept = []
+            for dirname in dirs:
+                candidate = current_path / dirname
+                if candidate == UNLOCKED or candidate == ROOT / "Unlocked":
+                    continue
+                try:
+                    if candidate.is_symlink() or not candidate.is_dir():
+                        continue
+                except OSError:
+                    continue
+                kept.append(dirname)
+                try:
+                    rel = candidate.relative_to(ROOT).as_posix()
+                    if valid_key(rel):
+                        opts.append(rel)
+                except (OSError, ValueError):
+                    continue
+            dirs[:] = kept
+    except OSError:
+        # Keep the dashboard available even if the external disk has a transient
+        # filesystem or disconnected-mount error.
+        pass
+    return sorted(set(opts), key=lambda value: (value != "", value.lower()))
 def mounted(p): return os.path.ismount(p)
 @app.get("/")
 def home():
