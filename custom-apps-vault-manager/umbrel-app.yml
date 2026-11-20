@@ -1,0 +1,21 @@
+manifestVersion: 1
+id: custom-apps-vault-manager
+category: Utilities
+name: Vault Manager
+version: "1.0.0"
+tagline: Password-protected encrypted vaults
+description: >-
+  Create and manage independent gocryptfs encrypted vaults on your external
+  drive. Unlock, lock, browse, upload and download files from the Umbrel UI.
+releaseNotes: >-
+  Initial release of Vault Manager for personal Umbrel installations.
+developer: Personal
+website: https://github.com/desantesway/umbrel-custom-apps
+dependencies: []
+repo: https://github.com/desantesway/umbrel-custom-apps
+support: https://github.com/desantesway/umbrel-custom-apps/issues
+port: 8088
+path: ""
+gallery: []
+defaultPassword: ""
+icon: https://raw.githubusercontent.com/desantesway/umbrel-custom-apps/main/custom-apps-vault-manager/icon.png
