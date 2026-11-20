@@ -1,12 +1,10 @@
 name: Publish Vault Manager image
-
 on:
   workflow_dispatch:
   push:
     paths:
       - "custom-apps-vault-manager/**"
       - ".github/workflows/publish-vault-manager.yml"
-
 jobs:
   publish:
     runs-on: ubuntu-latest
@@ -28,5 +26,5 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            ghcr.io/desantesway/vault-manager:1.0.2
+            ghcr.io/desantesway/vault-manager:1.0.3
             ghcr.io/desantesway/vault-manager:latest
