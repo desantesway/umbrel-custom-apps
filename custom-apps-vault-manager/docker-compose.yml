@@ -9,7 +9,7 @@ services:
       APP_PORT: "8088"
 
   server:
-    image: ghcr.io/desantesway/vault-manager:1.0.1
+    image: ghcr.io/desantesway/vault-manager:1.0.2
     init: true
     restart: on-failure
     stop_grace_period: 1m

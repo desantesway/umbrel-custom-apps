@@ -58,7 +58,8 @@ HOME = r"""
 </div>{% endfor %}</div>{% else %}<p class="muted">No vaults yet.</p>{% endif %}</section>
 <section class="card"><h2>Storage</h2><small>Encrypted vaults</small><div class="path">{{root}}</div>
 <small>Unlocked mounts</small><div class="path">{{unlocked}}</div></section>
-"""BROWSE = r"""
+"""
+BROWSE = r"""
 <section class="card"><p><a href="/">← All vaults</a></p><div class="row"><h2>📂 {{name}}</h2>
 <form method="post" action="/lock/{{name}}"><input type="hidden" name="csrf" value="{{csrf}}"><button class="danger">Lock vault</button></form></div>
 <small>/{{relative}}</small>{% if parent is not none %}<p><a href="/browse/{{name}}?path={{parent|urlencode}}">← Parent folder</a></p>{% endif %}
@@ -82,10 +83,9 @@ def mounted(p): return os.path.ismount(p)
 @app.get("/")
 def home():
     vaults=[]
-    if session.get("logged"):
-        for p in sorted(ROOT.iterdir()):
-            if p.is_dir() and p.name!="Unlocked" and (p/"gocryptfs.conf").is_file():
-                vaults.append({"name":p.name,"open":mounted(UNLOCKED/p.name)})
+    for p in sorted(ROOT.iterdir()):
+        if p.is_dir() and p.name!="Unlocked" and (p/"gocryptfs.conf").is_file():
+            vaults.append({"name":p.name,"open":mounted(UNLOCKED/p.name)})
     return page(render_template_string(HOME,logged=True,csrf=token(),
         vaults=vaults,root=str(ROOT),unlocked=str(UNLOCKED)))
 @app.post("/create")
