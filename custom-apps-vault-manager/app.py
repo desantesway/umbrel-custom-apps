@@ -1,10 +1,11 @@
-import hmac, os, re, secrets, subprocess, threading, time
+import hmac, os, re, secrets, subprocess, threading, time, shutil
 from pathlib import Path
 from urllib.parse import quote
 from flask import Flask, abort, flash, redirect, render_template_string, request, send_file, session, url_for
 from werkzeug.utils import secure_filename
 
 ROOT = Path(os.environ.get("VAULT_ROOT", "/vault")).resolve()
+SOURCE = Path(os.environ.get("SOURCE_ROOT", "/source")).resolve()
 UNLOCKED = ROOT / "Unlocked"
 DATA = Path(os.environ.get("APP_DATA_DIR", "/data"))
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
@@ -56,6 +57,7 @@ HOME = r"""
 {% else %}<form method="post" action="/unlock/{{v.name}}"><input type="hidden" name="csrf" value="{{csrf}}">
 <label>Vault password</label><input type="password" name="password" required><button>Unlock</button></form>{% endif %}
 </div>{% endfor %}</div>{% else %}<p class="muted">No vaults yet.</p>{% endif %}</section>
+<section class="card"><h2>File browser</h2><p><a href="/source">Browse files on your Toshiba drive and copy them into an unlocked vault →</a></p></section>
 <section class="card"><h2>Storage</h2><small>Encrypted vaults</small><div class="path">{{root}}</div>
 <small>Unlocked mounts</small><div class="path">{{unlocked}}</div></section>
 """
@@ -68,6 +70,16 @@ BROWSE = r"""
 {% for x in items %}<div class="file"><span>{% if x.dir %}📁 <a href="/browse/{{name}}?path={{x.rel|urlencode}}">{{x.name}}/</a>{% else %}📄 {{x.name}}{% endif %}</span>
 {% if not x.dir %}<a href="/download/{{name}}/{{x.rel}}">Download</a>{% endif %}</div>{% else %}<p class="muted">Folder is empty.</p>{% endfor %}</section>
 """
+SOURCE_BROWSER = r"""
+<section class="card"><p><a href="/">← Vault Manager</a></p><h2>Browse Toshiba drive</h2>
+<p class="muted">Select files or folders, choose an unlocked vault, and copy them into it. The source drive is read-only to this app.</p>
+{% if parent is not none %}<p><a href="/source?path={{parent|urlencode}}">← Parent folder</a></p>{% endif %}
+<form method="post" action="/source-copy"><input type="hidden" name="csrf" value="{{csrf}}"><input type="hidden" name="path" value="{{relative}}">
+<label>Copy selected items into</label><select name="vault" required>{% for v in open_vaults %}<option value="{{v}}">{{v}}</option>{% endfor %}</select>
+<div style="margin:12px 0"><button type="button" class="secondary" onclick="document.querySelectorAll('input[name=items]').forEach(x=>x.checked=true)">Select all</button> <button type="submit">Copy selected into vault</button></div>
+{% for x in items %}<div class="file"><label style="display:flex;align-items:center;gap:10px"><input style="width:auto;margin:0" type="checkbox" name="items" value="{{x.rel}}"><span>{% if x.dir %}📁 <a href="/source?path={{x.rel|urlencode}}">{{x.name}}/</a>{% else %}📄 {{x.name}}{% endif %}</span></label></div>{% else %}<p class="muted">No files in this folder.</p>{% endfor %}</form></section>
+"""
+
 def token():
     if "csrf" not in session: session["csrf"] = secrets.token_urlsafe(24)
     return session["csrf"]
@@ -111,7 +123,7 @@ def unlock(n):
     mnt.mkdir(parents=True,exist_ok=True)
     if mounted(mnt): flash("Already unlocked."); return redirect("/")
     if any(mnt.iterdir()): flash("Unlocked mount folder must be empty."); return redirect("/")
-    proc=subprocess.Popen(["gocryptfs","-fg","-allow_other","-o","uid=1000,gid=1000","-passfile","/dev/stdin",str(enc),str(mnt)],
+    proc=subprocess.Popen(["gocryptfs","-fg","-allow_other","-passfile","/dev/stdin",str(enc),str(mnt)],
         stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
     proc.stdin.write((request.form.get("password","")+"\n").encode()); proc.stdin.close()
     with children_lock: children[n]=proc
@@ -169,4 +181,51 @@ def download(n,rel):
     p=safe(root,rel)
     if not p.is_file() or p.is_symlink(): abort(404)
     return send_file(p,as_attachment=True)
+@app.get("/source")
+def source_browser():
+    rel=request.args.get("path","")
+    if rel and Path(rel).parts and Path(rel).parts[0] == "Vault": abort(404)
+    cur=safe(SOURCE,rel)
+    if not cur.is_dir(): abort(404)
+    items=[]
+    for p in sorted(cur.iterdir(),key=lambda x:(not x.is_dir(),x.name.lower())):
+        # Never expose the encrypted vault container or its mount tree through the source picker.
+        if not rel and p.name == "Vault": continue
+        if p.is_symlink(): continue
+        items.append({"name":p.name,"dir":p.is_dir(),"rel":str(p.relative_to(SOURCE))})
+    parent=str(Path(rel).parent) if rel and str(Path(rel).parent)!="." else None
+    open_vaults=[p.name for p in ROOT.iterdir() if p.is_dir() and p.name!="Unlocked" and (p/"gocryptfs.conf").is_file() and mounted(UNLOCKED/p.name)]
+    return page(render_template_string(SOURCE_BROWSER,items=items,relative=rel,parent=parent,csrf=token(),open_vaults=open_vaults))
+
+@app.post("/source-copy")
+def source_copy():
+    rel=request.form.get("path","")
+    if rel and Path(rel).parts and Path(rel).parts[0] == "Vault": abort(404)
+    vault=request.form.get("vault","")
+    if not valid(vault): abort(400)
+    srcroot=(UNLOCKED/vault).resolve()
+    if not mounted(srcroot): abort(400)
+    current=safe(SOURCE,rel)
+    if not current.is_dir(): abort(400)
+    selected=request.form.getlist("items")
+    if not selected: flash("Select at least one file or folder."); return redirect(url_for("source_browser",path=rel))
+    copied=0; skipped=0
+    for item in selected:
+        source=safe(SOURCE,item)
+        if source==SOURCE or not source.exists() or source.is_symlink(): skipped+=1; continue
+        # Each selected entry must be directly inside the folder currently being browsed.
+        if source.parent != current: skipped+=1; continue
+        dest=srcroot/source.name
+        if dest.exists(): skipped+=1; continue
+        try:
+            if source.is_dir():
+                shutil.copytree(source,dest,symlinks=True)
+            elif source.is_file(): shutil.copy2(source,dest)
+            else: skipped+=1; continue
+            copied+=1
+        except Exception:
+            skipped+=1
+    flash(f"Copied {copied} item(s) into {vault}; skipped {skipped}.")
+    return redirect(url_for("browse",n=vault))
+
 if __name__=="__main__": app.run(host="0.0.0.0",port=PORT,threaded=True)

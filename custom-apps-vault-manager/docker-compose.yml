@@ -9,7 +9,7 @@ services:
       APP_PORT: "8088"
 
   server:
-    image: ghcr.io/desantesway/vault-manager:1.0.2
+    image: ghcr.io/desantesway/vault-manager:1.0.3
     init: true
     restart: on-failure
     stop_grace_period: 1m
@@ -20,7 +20,6 @@ services:
     security_opt:
       - apparmor:unconfined
     environment:
-      APP_PASSWORD: "${APP_PASSWORD}"
       APP_DATA_DIR: /data
       VAULT_ROOT: /vault
       PORT: "8088"
@@ -31,3 +30,8 @@ services:
         target: /vault
         bind:
           propagation: rshared
+
+      - type: bind
+        source: "/home/umbrel/umbrel/external/TOSHIBA HDW"
+        target: /source
+        read_only: true

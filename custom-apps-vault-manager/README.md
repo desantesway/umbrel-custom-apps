@@ -1,17 +1,9 @@
-# Vault Manager 1.0.2 — syntax and dashboard fix
+# Vault Manager 1.0.3
 
-This package fixes a malformed Python template boundary that caused:
-`SyntaxError: invalid syntax` at `BROWSE = r"""`.
+Fixes gocryptfs unlock command by removing the unsupported `-o uid=1000,gid=1000` argument. Adds a Toshiba-drive file picker: browse the drive, select files/folders, and copy them into an unlocked vault. The source drive is mounted read-only inside the app; the encrypted vault directory is hidden from the source picker.
 
-It also removes the stale APP_PASSWORD environment entry and fixes the dashboard so vaults are listed without a separate app login.
+## Build/publish
+Replace the app folder in your GitHub repo, update the workflow to publish `ghcr.io/desantesway/vault-manager:1.0.3` for `linux/amd64,linux/arm64`, run Actions, and keep the GHCR package public.
 
-## Update
-1. Replace the entire `custom-apps-vault-manager/` folder in your GitHub repository with this folder.
-2. Replace `.github/workflows/publish-vault-manager.yml` with the included workflow.
-3. Commit.
-4. Run the GitHub Actions workflow and wait for a green success.
-5. Make sure the GHCR package `vault-manager` is Public.
-6. Update/reinstall the app in Umbrel. The app/image version is now 1.0.2.
-
-The workflow builds `linux/amd64` and `linux/arm64`.
-The app's encrypted vault passwords are unchanged; this patch only fixes dashboard startup/login handling.
+## Safety
+Existing encrypted vault data is not deleted or recreated. Selected files are copied, not moved, and existing destination names are skipped. Keep a separate backup of important data and recovery keys. This generated build has been syntax-checked but not tested on the Umbrel hardware; verify unlock and file copy with a disposable test vault/file first.
