@@ -6,6 +6,7 @@ from werkzeug.utils import secure_filename
 
 ROOT = Path(os.environ.get("VAULT_ROOT", "/vault")).resolve()
 SOURCE = Path(os.environ.get("SOURCE_ROOT", "/source")).resolve()
+APP_DATA_ROOT = Path(os.environ.get("APP_DATA_ROOT", "/app-data")).resolve()
 UNLOCKED = ROOT / "Unlocked"
 DATA = Path(os.environ.get("APP_DATA_DIR", "/data"))
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
@@ -48,7 +49,9 @@ HOME = r"""
 <section class="card"><h2>Create encrypted vault</h2><form method="post" action="/create">
 <input type="hidden" name="csrf" value="{{csrf}}"><label>Vault name</label>
 <input name="name" pattern="[A-Za-z0-9_-]{1,48}" placeholder="Personal" required>
-<label>Save encrypted vault inside</label><select name="location"><option value="">Vault root</option>{% for loc in locations if loc %}<option value="{{loc}}">{{loc}}</option>{% endfor %}</select>
+<label>Encrypted vault storage folder</label>
+<input name="location" value="{{location}}" readonly required>
+<a href="/pick?path={{location|urlencode}}">Choose directory…</a>
 <label>Vault password</label><input type="password" name="password" minlength="8" required>
 <button>Create vault</button></form><small>Choose a folder on the Toshiba drive. Save the recovery key separately.</small></section>
 <section class="card"><h2>Your vaults</h2>{% if vaults %}<div class="grid">{% for v in vaults %}
@@ -82,6 +85,17 @@ SOURCE_BROWSER = r"""
 {% for x in items %}<div class="file"><label style="display:flex;align-items:center;gap:10px"><input style="width:auto;margin:0" type="checkbox" name="items" value="{{x.rel}}"><span>{% if x.dir %}📁 <a href="/source?path={{x.rel|urlencode}}">{{x.name}}/</a>{% else %}📄 {{x.name}}{% endif %}</span></label></div>{% else %}<p class="muted">No files in this folder.</p>{% endfor %}</form></section>
 """
 
+PICKER = r"""
+<section class="card"><p><a href="/">← Cancel and return</a></p><h2>Choose vault storage folder</h2>
+<p class="muted">Browse directories under {{root}}. Select the current folder as the destination.</p>
+<div class="path">{{current or "APP_DATA_ROOT"}}</div>
+<form method="post" action="/select-location"><input type="hidden" name="csrf" value="{{csrf}}">
+<input type="hidden" name="location" value="{{current}}">
+<button>Select this folder</button></form>
+{% if parent is not none %}<p><a href="/pick?path={{parent|urlencode}}">← Parent folder</a></p>{% endif %}
+{% for x in items %}<div class="file"><span>📁 <a href="/pick?path={{x.rel|urlencode}}">{{x.name}}/</a></span></div>{% else %}<p class="muted">No subfolders here.</p>{% endfor %}
+</section>
+"""
 def token():
     if "csrf" not in session: session["csrf"] = secrets.token_urlsafe(24)
     return session["csrf"]
@@ -94,63 +108,94 @@ def page(body, **kw):
     return render_template_string(SHELL, body=body, logged=session.get("logged",False), csrf=token(), **kw)
 def valid(n): return bool(re.fullmatch(r"[A-Za-z0-9_-]{1,48}", n or ""))
 def valid_key(k):
-    return bool(k) and "\\" not in k and all(part not in ("", ".", "..", "Unlocked") for part in Path(k).parts) and all(valid(part) for part in Path(k).parts)
-def enc_path(k): return safe(ROOT, k)
-def mount_path(k): return safe(UNLOCKED, k)
+    if not k or "\\\\" in k:
+        return False
+    parts = Path(k).parts
+    if len(parts) < 2 or parts[0] not in ("appdata", "vault"):
+        return False
+    return all(part not in ("", ".", "..", "Unlocked") and valid(part) for part in parts[1:])
+
+def enc_path(k):
+    if not valid_key(k): abort(404)
+    parts = Path(k).parts
+    base = APP_DATA_ROOT if parts[0] == "appdata" else ROOT
+    return safe(base, Path(*parts[1:]))
+
+def mount_path(k):
+    if not valid_key(k): abort(404)
+    return safe(UNLOCKED, k)
+
 def vault_records():
     records=[]
-    for conf in ROOT.rglob("gocryptfs.conf"):
-        rel=conf.parent.relative_to(ROOT)
-        if not rel.parts or rel.parts[0] == "Unlocked": continue
-        key=rel.as_posix()
-        if valid_key(key): records.append({"key":key,"name":conf.parent.name,"location":str(rel.parent) if str(rel.parent)!="." else "Root","open":mounted(mount_path(key))})
+    # New vaults are stored beneath APP_DATA_ROOT; legacy vaults remain discoverable in ROOT.
+    for base, prefix in ((APP_DATA_ROOT, "appdata"), (ROOT, "vault")):
+        try:
+            for conf in base.rglob("gocryptfs.conf"):
+                rel=conf.parent.relative_to(base)
+                if not rel.parts or rel.parts[0] == "Unlocked": continue
+                key=(Path(prefix)/rel).as_posix()
+                if valid_key(key):
+                    records.append({"key":key,"name":conf.parent.name,
+                        "location":str(rel.parent) if str(rel.parent)!="." else "Root",
+                        "open":mounted(mount_path(key))})
+        except OSError:
+            continue
     return sorted(records,key=lambda x:x["key"].lower())
-def location_options():
-    # Do not traverse Unlocked: it contains FUSE mountpoints. A disconnected
-    # gocryptfs mount can raise ENOTCONN/EIO during stat(), breaking the home page.
-    opts=[""]
+
+def location_options(rel=""):
+    # Directory picker is confined to APP_DATA_ROOT.
+    cur=safe(APP_DATA_ROOT, rel)
+    if not cur.is_dir(): abort(404)
+    options=[]
     try:
-        for current, dirs, _files in os.walk(ROOT, topdown=True, followlinks=False):
-            current_path = Path(current)
-            kept = []
-            for dirname in dirs:
-                candidate = current_path / dirname
-                if candidate == UNLOCKED or candidate == ROOT / "Unlocked":
-                    continue
-                try:
-                    if candidate.is_symlink() or not candidate.is_dir():
-                        continue
-                except OSError:
-                    continue
-                kept.append(dirname)
-                try:
-                    rel = candidate.relative_to(ROOT).as_posix()
-                    if valid_key(rel):
-                        opts.append(rel)
-                except (OSError, ValueError):
-                    continue
-            dirs[:] = kept
+        for p in sorted(cur.iterdir(), key=lambda x:x.name.lower()):
+            try:
+                if p.is_symlink() or not p.is_dir(): continue
+                child_rel=p.relative_to(APP_DATA_ROOT).as_posix()
+                options.append({"name":p.name,"rel":child_rel})
+            except OSError:
+                continue
     except OSError:
-        # Keep the dashboard available even if the external disk has a transient
-        # filesystem or disconnected-mount error.
         pass
-    return sorted(set(opts), key=lambda value: (value != "", value.lower()))
+    parent=str(Path(rel).parent) if rel and str(Path(rel).parent)!="." else None
+    return options, parent, rel
+
 def mounted(p): return os.path.ismount(p)
 @app.get("/")
 def home():
     vaults=vault_records()
+    location=session.get("new_vault_location","")
     return page(render_template_string(HOME,logged=True,csrf=token(),
-        vaults=vaults,locations=location_options(),root=str(ROOT),unlocked=str(UNLOCKED)))
+        vaults=vaults,location=location,root=str(APP_DATA_ROOT),unlocked=str(UNLOCKED)))
+
+@app.get("/pick")
+def pick_location():
+    rel=request.args.get("path","")
+    items,parent,current=location_options(rel)
+    return page(render_template_string(PICKER,items=items,parent=parent,current=current,
+        root=str(APP_DATA_ROOT),csrf=token()))
+
+@app.post("/select-location")
+def select_location():
+    rel=request.form.get("location","")
+    safe(APP_DATA_ROOT, rel)
+    if rel and not safe(APP_DATA_ROOT, rel).is_dir(): abort(400)
+    session["new_vault_location"]=rel
+    flash("Storage folder selected.")
+    return redirect("/")
 @app.post("/create")
 def create():
     n,pw=request.form.get("name",""),request.form.get("password","")
     location=request.form.get("location","")
-    if not valid(n) or len(pw)<8 or (location and not valid_key(location)):
-        flash("Invalid name, location or password (minimum 8 characters)."); return redirect("/")
-    parent=safe(ROOT,location)
-    if not parent.is_dir() or parent==UNLOCKED or UNLOCKED in parent.parents:
-        flash("Invalid vault location."); return redirect("/")
-    key=(Path(location)/n).as_posix() if location else n
+    if not valid(n) or len(pw)<8:
+        flash("Invalid name or password (minimum 8 characters)."); return redirect("/")
+    try:
+        parent=safe(APP_DATA_ROOT,location)
+    except Exception:
+        flash("Invalid storage folder."); return redirect("/")
+    if not parent.is_dir():
+        flash("Invalid storage folder."); return redirect("/")
+    key=(Path("appdata")/location/n).as_posix() if location else (Path("appdata")/n).as_posix()
     enc,mnt=enc_path(key),mount_path(key)
     if enc.exists(): flash("A vault with that name already exists at this location."); return redirect("/")
     enc.mkdir(mode=0o700); mnt.mkdir(parents=True,exist_ok=True,mode=0o700)
@@ -159,6 +204,7 @@ def create():
             input=(pw+"\n").encode(),stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=90)
         output=r.stdout.decode(errors="replace")
         if r.returncode: flash("Creation failed: "+output[-700:]); return redirect("/")
+        session.pop("new_vault_location", None)
         return page(render_template_string("""<section class="card"><h2>Vault created: {{n}}</h2>
 <p><b>Save this recovery key now.</b> Store it separately from the Toshiba drive.</p><pre>{{output}}</pre><a href="/">Return to Vault Manager</a></section>""",n=n,output=output))
     except Exception as e: flash("Creation failed: "+str(e)); return redirect("/")

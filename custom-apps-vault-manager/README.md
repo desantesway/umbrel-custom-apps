@@ -1,22 +1,16 @@
-# Vault Manager 1.0.5 — stale FUSE mount fix
+# Vault Manager 1.0.6 — APP_DATA_ROOT directory picker
 
-Fixes the dashboard Internal Server Error caused by `location_options()` recursively scanning `Vault/Unlocked` and calling `stat()` on a disconnected FUSE mount (OSError 107: Transport endpoint is not connected).
+This version changes only the destination selection used when creating new vaults.
 
-The location picker now deliberately skips the entire `Unlocked` tree and catches filesystem errors while enumerating storage folders. Existing encrypted vault data and vault locations are not migrated or modified.
+- The picker starts at the host path provided by `${APP_DATA_ROOT}`.
+- It browses directories only, and allows selecting the current directory.
+- New encrypted vaults are created in the selected directory under APP_DATA_ROOT.
+- Existing vaults stored under the previous Toshiba `/vault` root remain discoverable and are not moved.
+- Unlocked mountpoints remain under `/vault/Unlocked/` and use namespaced paths to avoid collisions.
+- The existing FUSE/gocryptfs unlock command is retained from 1.0.5.
 
-## Update
+## Install
 
-1. Replace `custom-apps-vault-manager/` in your GitHub repository with this folder.
-2. Replace `.github/workflows/publish-vault-manager.yml` with the included workflow.
-3. Commit, then run **Actions → Publish Vault Manager image**.
-4. Wait for success and update/reinstall the app in Umbrel.
+Replace the `custom-apps-vault-manager` folder and `.github/workflows/publish-vault-manager.yml` in your repository with the included versions. Commit and run the GitHub Actions workflow. Publish both `linux/amd64` and `linux/arm64`, tag `1.0.6`, and keep the GHCR package public.
 
-The image tag and app version are `1.0.5` and the workflow builds both `linux/amd64` and `linux/arm64`.
-
-## If the old disconnected mount remains
-
-After the new version is running, if the `Person` mount still reports a transport endpoint error, try detaching only that stale mount from inside the container:
-
-`sudo docker exec custom-apps-vault-manager_server_1 fusermount3 -uz /vault/Unlocked/Person`
-
-Do not delete the encrypted `Person` directory under `/vault`; it contains the encrypted vault data.
+**Important:** The host must define `APP_DATA_ROOT` for Docker Compose and it must be a directory Umbrel can bind-mount. If your Umbrel installation does not define that variable, Compose will fail until the correct host path is supplied. Existing vault data is not migrated.
