@@ -2,7 +2,7 @@ manifestVersion: 1
 id: custom-apps-vault-manager
 category: Utilities
 name: Vault Manager
-version: "1.0.6"
+version: "1.0.7"
 tagline: Password-protected encrypted vaults
 description: >-
   Create and manage independent gocryptfs encrypted vaults on your external

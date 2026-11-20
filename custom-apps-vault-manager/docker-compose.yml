@@ -9,7 +9,7 @@ services:
       APP_PORT: "8088"
 
   server:
-    image: ghcr.io/desantesway/vault-manager:1.0.6
+    image: ghcr.io/desantesway/vault-manager:1.0.7
     init: true
     restart: on-failure
     stop_grace_period: 1m
@@ -20,15 +20,13 @@ services:
     security_opt:
       - apparmor:unconfined
     environment:
-      APP_DATA_DIR: /data
+      APP_DATA_DIR: /app-data/data
       VAULT_ROOT: /vault
       APP_DATA_ROOT: /app-data
       PORT: "8088"
     volumes:
-      - "${APP_DATA_DIR}/data:/data"
-      - type: bind
-        source: "${APP_DATA_ROOT}"
-        target: /app-data
+      # Umbrel expands APP_DATA_DIR on the host to this app's persistent directory.
+      - "${APP_DATA_DIR}:/app-data"
       - type: bind
         source: "/home/umbrel/umbrel/external/TOSHIBA HDW/Vault"
         target: /vault

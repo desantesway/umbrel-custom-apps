@@ -1,16 +1,23 @@
-# Vault Manager 1.0.6 — APP_DATA_ROOT directory picker
+# Vault Manager 1.0.7 — correct Umbrel app-data directory mapping
 
-This version changes only the destination selection used when creating new vaults.
+This release corrects the storage-directory picker.
 
-- The picker starts at the host path provided by `${APP_DATA_ROOT}`.
-- It browses directories only, and allows selecting the current directory.
-- New encrypted vaults are created in the selected directory under APP_DATA_ROOT.
-- Existing vaults stored under the previous Toshiba `/vault` root remain discoverable and are not moved.
-- Unlocked mountpoints remain under `/vault/Unlocked/` and use namespaced paths to avoid collisions.
-- The existing FUSE/gocryptfs unlock command is retained from 1.0.5.
+Umbrel supplies `${APP_DATA_DIR}` as a host-side path for this app's persistent data directory. Docker now mounts that directory into the container at `/app-data`:
 
-## Install
+    ${APP_DATA_DIR}:/app-data
 
-Replace the `custom-apps-vault-manager` folder and `.github/workflows/publish-vault-manager.yml` in your repository with the included versions. Commit and run the GitHub Actions workflow. Publish both `linux/amd64` and `linux/arm64`, tag `1.0.6`, and keep the GHCR package public.
+The picker starts at `/app-data`, which is the real mounted directory. It no longer tries to bind a separate `${APP_DATA_ROOT}` host variable.
 
-**Important:** The host must define `APP_DATA_ROOT` for Docker Compose and it must be a directory Umbrel can bind-mount. If your Umbrel installation does not define that variable, Compose will fail until the correct host path is supplied. Existing vault data is not migrated.
+The app's internal persistent state remains in `/app-data/data`, which maps to the same host-side `${APP_DATA_DIR}/data` location used by the previous release. Existing session state is therefore preserved.
+
+## Publish
+
+1. Replace `custom-apps-vault-manager/` in the repository with this folder.
+2. Replace `.github/workflows/publish-vault-manager.yml` with the included workflow.
+3. Commit and run the GitHub Actions workflow.
+4. Confirm the GHCR package is Public.
+5. Update the app from the Umbrel custom app store.
+
+The image tags are `1.0.7` and `latest`, built for `linux/amd64` and `linux/arm64`.
+
+Existing vaults on the Toshiba drive are not moved. The picker only selects the directory in which a new encrypted vault is created.

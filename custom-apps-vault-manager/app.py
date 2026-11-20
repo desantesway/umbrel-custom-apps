@@ -88,7 +88,7 @@ SOURCE_BROWSER = r"""
 PICKER = r"""
 <section class="card"><p><a href="/">← Cancel and return</a></p><h2>Choose vault storage folder</h2>
 <p class="muted">Browse directories under {{root}}. Select the current folder as the destination.</p>
-<div class="path">{{current or "APP_DATA_ROOT"}}</div>
+<div class="path">{{root if not current else root ~ "/" ~ current}}</div>
 <form method="post" action="/select-location"><input type="hidden" name="csrf" value="{{csrf}}">
 <input type="hidden" name="location" value="{{current}}">
 <button>Select this folder</button></form>
