@@ -1,9 +1,5 @@
-# Vault Manager 1.0.3
+# Vault Manager 1.0.4
 
-Fixes gocryptfs unlock command by removing the unsupported `-o uid=1000,gid=1000` argument. Adds a Toshiba-drive file picker: browse the drive, select files/folders, and copy them into an unlocked vault. The source drive is mounted read-only inside the app; the encrypted vault directory is hidden from the source picker.
+Adds a vault storage-folder selector and permanent deletion for locked vaults. Vaults can be stored in subfolders under `/vault`; unlocked mounts mirror their relative paths under `/vault/Unlocked`. Delete requires the vault to be locked and the user to type `DELETE`. Deletion permanently removes the encrypted vault data.
 
-## Build/publish
-Replace the app folder in your GitHub repo, update the workflow to publish `ghcr.io/desantesway/vault-manager:1.0.3` for `linux/amd64,linux/arm64`, run Actions, and keep the GHCR package public.
-
-## Safety
-Existing encrypted vault data is not deleted or recreated. Selected files are copied, not moved, and existing destination names are skipped. Keep a separate backup of important data and recovery keys. This generated build has been syntax-checked but not tested on the Umbrel hardware; verify unlock and file copy with a disposable test vault/file first.
+Update by replacing the app folder and workflow in your repository, committing, running GitHub Actions, and updating the app in Umbrel. Keep backups of encrypted vaults and recovery keys.

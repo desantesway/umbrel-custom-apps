@@ -48,18 +48,20 @@ HOME = r"""
 <section class="card"><h2>Create encrypted vault</h2><form method="post" action="/create">
 <input type="hidden" name="csrf" value="{{csrf}}"><label>Vault name</label>
 <input name="name" pattern="[A-Za-z0-9_-]{1,48}" placeholder="Personal" required>
+<label>Save encrypted vault inside</label><select name="location"><option value="">Vault root</option>{% for loc in locations if loc %}<option value="{{loc}}">{{loc}}</option>{% endfor %}</select>
 <label>Vault password</label><input type="password" name="password" minlength="8" required>
-<button>Create vault</button></form><small>Save the recovery key displayed after creation somewhere safe and separate from this drive.</small></section>
+<button>Create vault</button></form><small>Choose a folder on the Toshiba drive. Save the recovery key separately.</small></section>
 <section class="card"><h2>Your vaults</h2>{% if vaults %}<div class="grid">{% for v in vaults %}
 <div class="vault"><div class="row"><b>📁 {{v.name}}</b><span class="pill {{'open' if v.open else ''}}">{{'UNLOCKED' if v.open else 'LOCKED'}}</span></div>
-{% if v.open %}<p><a href="/browse/{{v.name}}">Browse files →</a></p>
-<form method="post" action="/lock/{{v.name}}"><input type="hidden" name="csrf" value="{{csrf}}"><button class="danger">Lock vault</button></form>
-{% else %}<form method="post" action="/unlock/{{v.name}}"><input type="hidden" name="csrf" value="{{csrf}}">
+<small>Location: {{v.location}}</small>
+{% if v.open %}<p><a href="/browse/{{v.key|urlencode}}">Browse files →</a></p>
+<form method="post" action="/lock/{{v.key}}"><input type="hidden" name="csrf" value="{{csrf}}"><button class="danger">Lock vault</button></form>
+{% else %}<form method="post" action="/unlock/{{v.key}}"><input type="hidden" name="csrf" value="{{csrf}}">
 <label>Vault password</label><input type="password" name="password" required><button>Unlock</button></form>{% endif %}
+{% if not v.open %}<form method="post" action="/delete/{{v.key}}" onsubmit="return confirm('Permanently delete this encrypted vault and ALL its contents? This cannot be undone.');"><input type="hidden" name="csrf" value="{{csrf}}"><label>Type DELETE to confirm</label><input name="confirm" required pattern="DELETE"><button class="danger">Delete vault permanently</button></form>{% endif %}
 </div>{% endfor %}</div>{% else %}<p class="muted">No vaults yet.</p>{% endif %}</section>
 <section class="card"><h2>File browser</h2><p><a href="/source">Browse files on your Toshiba drive and copy them into an unlocked vault →</a></p></section>
-<section class="card"><h2>Storage</h2><small>Encrypted vaults</small><div class="path">{{root}}</div>
-<small>Unlocked mounts</small><div class="path">{{unlocked}}</div></section>
+<section class="card"><h2>Storage</h2><small>Encrypted vaults</small><div class="path">{{root}}</div><small>Unlocked mounts</small><div class="path">{{unlocked}}</div></section>
 """
 BROWSE = r"""
 <section class="card"><p><a href="/">← All vaults</a></p><div class="row"><h2>📂 {{name}}</h2>
@@ -91,21 +93,43 @@ def request_guards():
 def page(body, **kw):
     return render_template_string(SHELL, body=body, logged=session.get("logged",False), csrf=token(), **kw)
 def valid(n): return bool(re.fullmatch(r"[A-Za-z0-9_-]{1,48}", n or ""))
+def valid_key(k):
+    return bool(k) and "\\" not in k and all(part not in ("", ".", "..", "Unlocked") for part in Path(k).parts) and all(valid(part) for part in Path(k).parts)
+def enc_path(k): return safe(ROOT, k)
+def mount_path(k): return safe(UNLOCKED, k)
+def vault_records():
+    records=[]
+    for conf in ROOT.rglob("gocryptfs.conf"):
+        rel=conf.parent.relative_to(ROOT)
+        if not rel.parts or rel.parts[0] == "Unlocked": continue
+        key=rel.as_posix()
+        if valid_key(key): records.append({"key":key,"name":conf.parent.name,"location":str(rel.parent) if str(rel.parent)!="." else "Root","open":mounted(mount_path(key))})
+    return sorted(records,key=lambda x:x["key"].lower())
+def location_options():
+    opts=[""]
+    for p in ROOT.rglob("*"):
+        if p.is_dir() and not p.is_symlink() and p != UNLOCKED and UNLOCKED not in p.parents:
+            rel=p.relative_to(ROOT).as_posix()
+            if valid_key(rel): opts.append(rel)
+    return opts
 def mounted(p): return os.path.ismount(p)
 @app.get("/")
 def home():
-    vaults=[]
-    for p in sorted(ROOT.iterdir()):
-        if p.is_dir() and p.name!="Unlocked" and (p/"gocryptfs.conf").is_file():
-            vaults.append({"name":p.name,"open":mounted(UNLOCKED/p.name)})
+    vaults=vault_records()
     return page(render_template_string(HOME,logged=True,csrf=token(),
-        vaults=vaults,root=str(ROOT),unlocked=str(UNLOCKED)))
+        vaults=vaults,locations=location_options(),root=str(ROOT),unlocked=str(UNLOCKED)))
 @app.post("/create")
 def create():
     n,pw=request.form.get("name",""),request.form.get("password","")
-    if not valid(n) or len(pw)<8: flash("Invalid name or password (minimum 8 characters)."); return redirect("/")
-    enc,mnt=ROOT/n,UNLOCKED/n
-    if enc.exists(): flash("That vault name already exists."); return redirect("/")
+    location=request.form.get("location","")
+    if not valid(n) or len(pw)<8 or (location and not valid_key(location)):
+        flash("Invalid name, location or password (minimum 8 characters)."); return redirect("/")
+    parent=safe(ROOT,location)
+    if not parent.is_dir() or parent==UNLOCKED or UNLOCKED in parent.parents:
+        flash("Invalid vault location."); return redirect("/")
+    key=(Path(location)/n).as_posix() if location else n
+    enc,mnt=enc_path(key),mount_path(key)
+    if enc.exists(): flash("A vault with that name already exists at this location."); return redirect("/")
     enc.mkdir(mode=0o700); mnt.mkdir(parents=True,exist_ok=True,mode=0o700)
     try:
         r=subprocess.run(["gocryptfs","-init","-passfile","/dev/stdin",str(enc)],
@@ -115,10 +139,10 @@ def create():
         return page(render_template_string("""<section class="card"><h2>Vault created: {{n}}</h2>
 <p><b>Save this recovery key now.</b> Store it separately from the Toshiba drive.</p><pre>{{output}}</pre><a href="/">Return to Vault Manager</a></section>""",n=n,output=output))
     except Exception as e: flash("Creation failed: "+str(e)); return redirect("/")
-@app.post("/unlock/<n>")
+@app.post("/unlock/<path:n>")
 def unlock(n):
-    if not valid(n): abort(404)
-    enc,mnt=ROOT/n,UNLOCKED/n
+    if not valid_key(n): abort(404)
+    enc,mnt=enc_path(n),mount_path(n)
     if not (enc/"gocryptfs.conf").is_file(): abort(404)
     mnt.mkdir(parents=True,exist_ok=True)
     if mounted(mnt): flash("Already unlocked."); return redirect("/")
@@ -133,10 +157,10 @@ def unlock(n):
             err=proc.stderr.read().decode(errors="replace")[-800:]; flash("Unlock failed: "+err); return redirect("/")
         time.sleep(.2)
     flash("Mount did not start. Check FUSE and mount propagation."); return redirect("/")
-@app.post("/lock/<n>")
+@app.post("/lock/<path:n>")
 def lock(n):
-    if not valid(n): abort(404)
-    mnt=UNLOCKED/n
+    if not valid_key(n): abort(404)
+    mnt=mount_path(n)
     if not mounted(mnt): flash("Already locked."); return redirect("/")
     r=subprocess.run(["fusermount3","-u",str(mnt)],capture_output=True,text=True)
     if r.returncode: flash("Lock failed: "+r.stderr[-500:])
@@ -144,14 +168,33 @@ def lock(n):
         with children_lock: children.pop(n,None)
         flash("Vault locked.")
     return redirect("/")
+@app.post("/delete/<path:n>")
+def delete_vault(n):
+    if not valid_key(n): abort(404)
+    enc=enc_path(n); mnt=mount_path(n)
+    if not (enc/"gocryptfs.conf").is_file(): abort(404)
+    if mounted(mnt):
+        flash("Lock this vault before deleting it."); return redirect("/")
+    if request.form.get("confirm") != "DELETE":
+        flash("Deletion not confirmed."); return redirect("/")
+    try:
+        shutil.rmtree(enc)
+        # Remove the empty mount directory only; never remove the Unlocked root.
+        if mnt.exists() and not any(mnt.iterdir()): mnt.rmdir()
+        with children_lock: children.pop(n,None)
+        flash("Vault permanently deleted.")
+    except Exception as e:
+        flash("Delete failed: "+str(e))
+    return redirect("/")
+
 def safe(root,rel):
     p=(root/rel).resolve()
     if p!=root and root not in p.parents: abort(403)
     return p
-@app.get("/browse/<n>")
+@app.get("/browse/<path:n>")
 def browse(n):
-    if not valid(n): abort(404)
-    root=(UNLOCKED/n).resolve()
+    if not valid_key(n): abort(404)
+    root=mount_path(n).resolve()
     if not mounted(root): abort(404)
     rel=request.args.get("path",""); cur=safe(root,rel)
     if not cur.is_dir(): abort(404)
@@ -161,10 +204,10 @@ def browse(n):
         items.append({"name":p.name,"dir":p.is_dir(),"rel":str(p.relative_to(root))})
     parent=str(Path(rel).parent) if rel and str(Path(rel).parent)!="." else None
     return page(render_template_string(BROWSE,name=n,items=items,relative=rel,parent=parent,csrf=token()))
-@app.post("/upload/<n>")
+@app.post("/upload/<path:n>")
 def upload(n):
-    if not valid(n): abort(404)
-    root=(UNLOCKED/n).resolve()
+    if not valid_key(n): abort(404)
+    root=mount_path(n).resolve()
     if not mounted(root): abort(404)
     rel=request.args.get("path",""); dest=safe(root,rel)
     if not dest.is_dir(): abort(404)
@@ -173,10 +216,10 @@ def upload(n):
         name=secure_filename(f.filename or "")
         if name and not (dest/name).exists(): f.save(dest/name); count+=1
     flash(f"Uploaded {count} file(s)."); return redirect(url_for("browse",n=n,path=rel))
-@app.get("/download/<n>/<path:rel>")
+@app.get("/download/<path:n>/<path:rel>")
 def download(n,rel):
-    if not valid(n): abort(404)
-    root=(UNLOCKED/n).resolve()
+    if not valid_key(n): abort(404)
+    root=mount_path(n).resolve()
     if not mounted(root): abort(404)
     p=safe(root,rel)
     if not p.is_file() or p.is_symlink(): abort(404)
@@ -194,7 +237,7 @@ def source_browser():
         if p.is_symlink(): continue
         items.append({"name":p.name,"dir":p.is_dir(),"rel":str(p.relative_to(SOURCE))})
     parent=str(Path(rel).parent) if rel and str(Path(rel).parent)!="." else None
-    open_vaults=[p.name for p in ROOT.iterdir() if p.is_dir() and p.name!="Unlocked" and (p/"gocryptfs.conf").is_file() and mounted(UNLOCKED/p.name)]
+    open_vaults=[v["key"] for v in vault_records() if v["open"]]
     return page(render_template_string(SOURCE_BROWSER,items=items,relative=rel,parent=parent,csrf=token(),open_vaults=open_vaults))
 
 @app.post("/source-copy")
@@ -202,8 +245,8 @@ def source_copy():
     rel=request.form.get("path","")
     if rel and Path(rel).parts and Path(rel).parts[0] == "Vault": abort(404)
     vault=request.form.get("vault","")
-    if not valid(vault): abort(400)
-    srcroot=(UNLOCKED/vault).resolve()
+    if not valid_key(vault): abort(400)
+    srcroot=mount_path(vault).resolve()
     if not mounted(srcroot): abort(400)
     current=safe(SOURCE,rel)
     if not current.is_dir(): abort(400)
