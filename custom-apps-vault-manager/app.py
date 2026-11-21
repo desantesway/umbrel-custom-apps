@@ -1,4 +1,4 @@
-import hmac, os, re, secrets, subprocess, threading, time, shutil
+import hmac, os, re, secrets, subprocess, threading, time, shutil, json, hashlib
 from pathlib import Path
 from urllib.parse import quote
 from flask import Flask, abort, flash, redirect, render_template_string, request, send_file, session, url_for
@@ -12,6 +12,8 @@ DATA = Path(os.environ.get("APP_DATA_DIR", "/data"))
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 PORT = int(os.environ.get("PORT", "8088"))
 DATA.mkdir(parents=True, exist_ok=True)
+mount_config_dir = DATA / "mount-locations"
+mount_config_dir.mkdir(parents=True, exist_ok=True)
 secret_file = DATA / "session-secret"
 if not secret_file.exists():
     secret_file.write_text(secrets.token_urlsafe(48))
@@ -51,7 +53,11 @@ HOME = r"""
 <input name="name" pattern="[A-Za-z0-9_-]{1,48}" placeholder="Personal" required>
 <label>Encrypted vault storage folder</label>
 <input name="location" value="{{location}}" readonly required>
-<a href="/pick?path={{location|urlencode}}">Choose directory…</a>
+<a href="/pick?kind=storage&path={{location|urlencode}}">Choose directory…</a>
+<label>Where should the unlocked folder appear?</label>
+<input name="unlock_location" value="{{unlock_location}}" readonly required>
+<a href="/pick?kind=unlocked&path={{unlock_location|urlencode}}">Choose unlocked folder location…</a>
+<small>The picker starts in the same directory as the encrypted vault location. The decrypted mount will appear in an Unlocked subfolder beneath your selection.</small>
 <label>Vault password</label><input type="password" name="password" minlength="8" required>
 <button>Create vault</button></form><small>Choose a folder on the Toshiba drive. Save the recovery key separately.</small></section>
 <section class="card"><h2>Your vaults</h2>{% if vaults %}<div class="grid">{% for v in vaults %}
@@ -86,10 +92,11 @@ SOURCE_BROWSER = r"""
 """
 
 PICKER = r"""
-<section class="card"><p><a href="/">← Cancel and return</a></p><h2>Choose vault storage folder</h2>
-<p class="muted">Browse directories under {{root}}. Select the current folder as the destination.</p>
+<section class="card"><p><a href="/">← Cancel and return</a></p><h2>{{title}}</h2>
+<p class="muted">{{help_text}}</p>
 <div class="path">{{root if not current else root ~ "/" ~ current}}</div>
 <form method="post" action="/select-location"><input type="hidden" name="csrf" value="{{csrf}}">
+<input type="hidden" name="kind" value="{{kind}}">
 <input type="hidden" name="location" value="{{current}}">
 <button>Select this folder</button></form>
 {% if parent is not none %}<p><a href="/pick?path={{parent|urlencode}}">← Parent folder</a></p>{% endif %}
@@ -121,9 +128,37 @@ def enc_path(k):
     base = APP_DATA_ROOT if parts[0] == "appdata" else ROOT
     return safe(base, Path(*parts[1:]))
 
+def mount_config_file(k):
+    digest = hashlib.sha256(k.encode("utf-8")).hexdigest()
+    return mount_config_dir / (digest + ".json")
+
+def unlocked_parent_rel(k):
+    cfg = mount_config_file(k)
+    if cfg.is_file():
+        try:
+            data = json.loads(cfg.read_text(encoding="utf-8"))
+            if data.get("vault_key") == k:
+                rel = data.get("unlocked_parent", "")
+                return safe(APP_DATA_ROOT, rel)
+        except (OSError, ValueError, TypeError):
+            pass
+    # Existing vaults retain their previous default mount location.
+    return enc_path(k).parent
+
 def mount_path(k):
     if not valid_key(k): abort(404)
-    return safe(UNLOCKED, k)
+    parent = unlocked_parent_rel(k)
+    return safe(parent / "Unlocked", enc_path(k).name)
+
+def save_unlocked_location(k, rel):
+    parent = safe(APP_DATA_ROOT, rel)
+    if not parent.is_dir():
+        raise ValueError("The selected unlocked-folder location does not exist.")
+    cfg = mount_config_file(k)
+    tmp = cfg.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"vault_key": k, "unlocked_parent": rel}), encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    tmp.replace(cfg)
 
 def vault_records():
     records=[]
@@ -165,28 +200,48 @@ def mounted(p): return os.path.ismount(p)
 def home():
     vaults=vault_records()
     location=session.get("new_vault_location","")
+    unlock_location=session.get("new_unlocked_location",location)
     return page(render_template_string(HOME,logged=True,csrf=token(),
-        vaults=vaults,location=location,root=str(APP_DATA_ROOT),unlocked=str(UNLOCKED)))
+        vaults=vaults,location=location,unlock_location=unlock_location,
+        root=str(APP_DATA_ROOT),unlocked=str(UNLOCKED)))
 
 @app.get("/pick")
 def pick_location():
-    rel=request.args.get("path","")
+    kind=request.args.get("kind","storage")
+    if kind not in ("storage","unlocked"): abort(400)
+    if kind == "unlocked":
+        start=session.get("new_vault_location","")
+        rel=request.args.get("path",start)
+        title="Choose unlocked folder location"
+        help_text="Choose the parent directory for the Unlocked/<vault-name> mount."
+    else:
+        rel=request.args.get("path","")
+        title="Choose encrypted vault storage folder"
+        help_text="Choose where the encrypted vault directory will be created."
     items,parent,current=location_options(rel)
     return page(render_template_string(PICKER,items=items,parent=parent,current=current,
-        root=str(APP_DATA_ROOT),csrf=token()))
+        root=str(APP_DATA_ROOT),title=title,help_text=help_text,kind=kind,csrf=token()))
 
 @app.post("/select-location")
 def select_location():
     rel=request.form.get("location","")
+    kind=request.form.get("kind","storage")
+    if kind not in ("storage","unlocked"): abort(400)
     safe(APP_DATA_ROOT, rel)
     if rel and not safe(APP_DATA_ROOT, rel).is_dir(): abort(400)
-    session["new_vault_location"]=rel
-    flash("Storage folder selected.")
+    if kind == "storage":
+        session["new_vault_location"]=rel
+        session["new_unlocked_location"]=rel
+        flash("Encrypted vault storage folder selected.")
+    else:
+        session["new_unlocked_location"]=rel
+        flash("Unlocked folder location selected.")
     return redirect("/")
 @app.post("/create")
 def create():
     n,pw=request.form.get("name",""),request.form.get("password","")
     location=request.form.get("location","")
+    unlock_location=request.form.get("unlock_location","")
     if not valid(n) or len(pw)<8:
         flash("Invalid name or password (minimum 8 characters)."); return redirect("/")
     try:
@@ -196,15 +251,24 @@ def create():
     if not parent.is_dir():
         flash("Invalid storage folder."); return redirect("/")
     key=(Path("appdata")/location/n).as_posix() if location else (Path("appdata")/n).as_posix()
-    enc,mnt=enc_path(key),mount_path(key)
+    enc=enc_path(key)
     if enc.exists(): flash("A vault with that name already exists at this location."); return redirect("/")
-    enc.mkdir(mode=0o700); mnt.mkdir(parents=True,exist_ok=True,mode=0o700)
+    try:
+        selected_unlock_parent=safe(APP_DATA_ROOT,unlock_location)
+        if not selected_unlock_parent.is_dir(): raise ValueError("Invalid unlocked-folder location.")
+    except Exception:
+        flash("Invalid unlocked-folder location."); return redirect("/")
+    enc.mkdir(mode=0o700)
+    save_unlocked_location(key, unlock_location)
+    mnt=mount_path(key)
+    mnt.mkdir(parents=True,exist_ok=True,mode=0o700)
     try:
         r=subprocess.run(["gocryptfs","-init","-passfile","/dev/stdin",str(enc)],
             input=(pw+"\n").encode(),stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=90)
         output=r.stdout.decode(errors="replace")
         if r.returncode: flash("Creation failed: "+output[-700:]); return redirect("/")
         session.pop("new_vault_location", None)
+        session.pop("new_unlocked_location", None)
         return page(render_template_string("""<section class="card"><h2>Vault created: {{n}}</h2>
 <p><b>Save this recovery key now.</b> Store it separately from the Toshiba drive.</p><pre>{{output}}</pre><a href="/">Return to Vault Manager</a></section>""",n=n,output=output))
     except Exception as e: flash("Creation failed: "+str(e)); return redirect("/")

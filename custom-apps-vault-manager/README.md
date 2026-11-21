@@ -1,23 +1,24 @@
-# Vault Manager 1.0.7 — correct Umbrel app-data directory mapping
+# Vault Manager 1.0.9 — choose unlocked mount location
 
-This release corrects the storage-directory picker.
+This update adds a second directory picker during vault creation.
 
-Umbrel supplies `${APP_DATA_DIR}` as a host-side path for this app's persistent data directory. Docker now mounts that directory into the container at `/app-data`:
+- The encrypted vault picker chooses where the gocryptfs ciphertext directory is created.
+- The unlocked-folder picker chooses the parent directory where the decrypted mount will appear.
+- The unlocked-folder picker starts in the same directory selected for encrypted storage.
+- The decrypted mount appears as `<chosen-unlocked-parent>/Unlocked/<vault-name>`.
 
-    ${APP_DATA_DIR}:/app-data
+Both pickers browse within Umbrel's app data directory mounted at `/app-data`. This allows a mapped external folder such as `/app-data/external` to be selected.
 
-The picker starts at `/app-data`, which is the real mounted directory. It no longer tries to bind a separate `${APP_DATA_ROOT}` host variable.
+The selected unlocked location is saved in persistent app metadata, keyed by vault. Existing vaults without metadata retain their previous mount-location behavior. Existing encrypted vault contents are not moved or modified.
 
-The app's internal persistent state remains in `/app-data/data`, which maps to the same host-side `${APP_DATA_DIR}/data` location used by the previous release. Existing session state is therefore preserved.
+## Publish/update
 
-## Publish
-
-1. Replace `custom-apps-vault-manager/` in the repository with this folder.
+1. Replace `custom-apps-vault-manager/` in your GitHub repository with this folder.
 2. Replace `.github/workflows/publish-vault-manager.yml` with the included workflow.
-3. Commit and run the GitHub Actions workflow.
-4. Confirm the GHCR package is Public.
-5. Update the app from the Umbrel custom app store.
+3. Commit changes and run the GitHub Actions workflow.
+4. Ensure the GHCR package is Public.
+5. Update Vault Manager in Umbrel.
 
-The image tags are `1.0.7` and `latest`, built for `linux/amd64` and `linux/arm64`.
+Build tags: `1.0.9` and `latest`, for `linux/amd64` and `linux/arm64`.
 
-Existing vaults on the Toshiba drive are not moved. The picker only selects the directory in which a new encrypted vault is created.
+Test with a new small vault first. Existing vaults keep their previous mount locations unless separately configured.
