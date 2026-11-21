@@ -225,7 +225,7 @@ def vault_records():
     # physical directory (as in the Umbrel external-drive configuration).
     # Scan that physical root only once so one encrypted vault gets one card.
     scanned_roots = []
-    for base, prefix in ((APP_DATA_ROOT, "appdata"), (ROOT, "vault")):
+    for base, prefix in ((ROOT, "vault"), (APP_DATA_ROOT, "appdata")):
         duplicate = False
         for previous in scanned_roots:
             try:
