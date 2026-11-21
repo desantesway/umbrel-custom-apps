@@ -161,21 +161,69 @@ def save_unlocked_location(k, rel):
     tmp.replace(cfg)
 
 def vault_records():
-    records=[]
-    # New vaults are stored beneath APP_DATA_ROOT; legacy vaults remain discoverable in ROOT.
-    for base, prefix in ((APP_DATA_ROOT, "appdata"), (ROOT, "vault")):
+    records = []
+    # Avoid pathlib.rglob() over the entire app-data tree: the external drive
+    # can contain large folders and FUSE mountpoints. Scan only a bounded depth,
+    # never follow symlinks, and never descend into unlocked mounts or app state.
+    excluded = {"Unlocked", "data", "mount-locations", "__pycache__"}
+    max_depth = 6
+
+    def scan(base, prefix):
         try:
-            for conf in base.rglob("gocryptfs.conf"):
-                rel=conf.parent.relative_to(base)
-                if not rel.parts or rel.parts[0] == "Unlocked": continue
-                key=(Path(prefix)/rel).as_posix()
-                if valid_key(key):
-                    records.append({"key":key,"name":conf.parent.name,
-                        "location":str(rel.parent) if str(rel.parent)!="." else "Root",
-                        "open":mounted(mount_path(key))})
+            base_stat = base.stat()
+            if not base.is_dir():
+                return
         except OSError:
-            continue
-    return sorted(records,key=lambda x:x["key"].lower())
+            return
+
+        stack = [(base, 0)]
+        while stack:
+            directory, depth = stack.pop()
+            try:
+                with os.scandir(directory) as entries:
+                    entries = list(entries)
+            except OSError:
+                continue
+
+            # A vault is identified by its own gocryptfs.conf, not by scanning
+            # files inside the encrypted directory.
+            try:
+                if any(e.name == "gocryptfs.conf" and e.is_file(follow_symlinks=False)
+                       for e in entries):
+                    rel = directory.relative_to(base)
+                    key = (Path(prefix) / rel).as_posix()
+                    if valid_key(key):
+                        try:
+                            is_open = mounted(mount_path(key))
+                        except OSError:
+                            is_open = False
+                        records.append({
+                            "key": key,
+                            "name": directory.name,
+                            "location": str(rel.parent) if str(rel.parent) != "." else "Root",
+                            "open": is_open
+                        })
+                    # Don't descend into the encrypted vault contents.
+                    continue
+            except OSError:
+                continue
+
+            if depth >= max_depth:
+                continue
+
+            for entry in entries:
+                if entry.name in excluded or entry.name.startswith("."):
+                    continue
+                try:
+                    if entry.is_symlink() or not entry.is_dir(follow_symlinks=False):
+                        continue
+                    stack.append((Path(entry.path), depth + 1))
+                except OSError:
+                    continue
+
+    scan(APP_DATA_ROOT, "appdata")
+    scan(ROOT, "vault")
+    return sorted(records, key=lambda x: x["key"].lower())
 
 def location_options(rel=""):
     # Directory picker is confined to APP_DATA_ROOT.
@@ -195,7 +243,11 @@ def location_options(rel=""):
     parent=str(Path(rel).parent) if rel and str(Path(rel).parent)!="." else None
     return options, parent, rel
 
-def mounted(p): return os.path.ismount(p)
+def mounted(p):
+    try:
+        return os.path.ismount(p)
+    except OSError:
+        return False
 @app.get("/")
 def home():
     vaults=vault_records()

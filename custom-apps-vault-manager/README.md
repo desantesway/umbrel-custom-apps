@@ -1,24 +1,26 @@
-# Vault Manager 1.0.9 — choose unlocked mount location
+# Vault Manager 1.1.0 — dashboard scan performance fix
 
-This update adds a second directory picker during vault creation.
+Fixes the main dashboard taking a long time to load.
 
-- The encrypted vault picker chooses where the gocryptfs ciphertext directory is created.
-- The unlocked-folder picker chooses the parent directory where the decrypted mount will appear.
-- The unlocked-folder picker starts in the same directory selected for encrypted storage.
-- The decrypted mount appears as `<chosen-unlocked-parent>/Unlocked/<vault-name>`.
+The previous dashboard recursively searched the entire APP_DATA_ROOT and legacy vault root using `Path.rglob()`. Because APP_DATA_ROOT can contain a large external drive and FUSE mountpoints, this could block the home page.
 
-Both pickers browse within Umbrel's app data directory mounted at `/app-data`. This allows a mapped external folder such as `/app-data/external` to be selected.
+The new scanner:
+- Uses bounded directory traversal (maximum six levels).
+- Does not follow symlinks.
+- Skips `Unlocked`, app state directories, and hidden directories.
+- Stops descending once it finds a gocryptfs vault.
+- Handles disconnected FUSE mount errors without failing the dashboard.
 
-The selected unlocked location is saved in persistent app metadata, keyed by vault. Existing vaults without metadata retain their previous mount-location behavior. Existing encrypted vault contents are not moved or modified.
+The existing vault storage and unlocked-location picker behavior from 1.0.9 is retained. No encrypted vault data is moved or deleted.
 
 ## Publish/update
 
 1. Replace `custom-apps-vault-manager/` in your GitHub repository with this folder.
 2. Replace `.github/workflows/publish-vault-manager.yml` with the included workflow.
-3. Commit changes and run the GitHub Actions workflow.
-4. Ensure the GHCR package is Public.
+3. Commit and run the GitHub Actions workflow.
+4. Ensure GHCR package visibility is Public.
 5. Update Vault Manager in Umbrel.
 
-Build tags: `1.0.9` and `latest`, for `linux/amd64` and `linux/arm64`.
+Image tags: `1.1.0` and `latest`, built for `linux/amd64` and `linux/arm64`.
 
-Test with a new small vault first. Existing vaults keep their previous mount locations unless separately configured.
+The scanner searches up to six directory levels below each configured root. If you store encrypted vaults deeper than that, they will not appear in the dashboard until the scan depth is adjusted.
