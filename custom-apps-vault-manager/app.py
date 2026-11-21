@@ -347,7 +347,7 @@ def unlock(n):
     mnt.mkdir(parents=True,exist_ok=True)
     if mounted(mnt): flash("Already unlocked."); return redirect("/")
     if any(mnt.iterdir()): flash("Unlocked mount folder must be empty."); return redirect("/")
-    proc=subprocess.Popen(["gocryptfs","-fg","-allow_other","-passfile","/dev/stdin",str(enc),str(mnt)],
+    proc=subprocess.Popen(["gocryptfs","-fg","-force_owner","1000:1000","-passfile","/dev/stdin",str(enc),str(mnt)],
         stdin=subprocess.PIPE,stdout=subprocess.DEVNULL,stderr=subprocess.PIPE)
     proc.stdin.write((request.form.get("password","")+"\n").encode()); proc.stdin.close()
     with children_lock: children[n]=proc
