@@ -221,8 +221,23 @@ def vault_records():
                 except OSError:
                     continue
 
-    scan(APP_DATA_ROOT, "appdata")
-    scan(ROOT, "vault")
+    # APP_DATA_ROOT and ROOT can be two bind-mount aliases of the same
+    # physical directory (as in the Umbrel external-drive configuration).
+    # Scan that physical root only once so one encrypted vault gets one card.
+    scanned_roots = []
+    for base, prefix in ((APP_DATA_ROOT, "appdata"), (ROOT, "vault")):
+        duplicate = False
+        for previous in scanned_roots:
+            try:
+                if base.resolve() == previous.resolve() or os.path.samefile(base, previous):
+                    duplicate = True
+                    break
+            except OSError:
+                continue
+        if duplicate:
+            continue
+        scan(base, prefix)
+        scanned_roots.append(base)
     return sorted(records, key=lambda x: x["key"].lower())
 
 def location_options(rel=""):
