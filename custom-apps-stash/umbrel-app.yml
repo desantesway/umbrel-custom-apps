@@ -1,0 +1,22 @@
+manifestVersion: 1
+id: custom-apps-stash
+category: Media
+name: Stash
+version: "1.0.0"
+tagline: Organize and browse your decrypted media library
+description: >-
+  Stash organizes and serves your media collection. This Umbrel app reads
+  decrypted Vault Manager folders from the Toshiba drive and keeps its own
+  configuration, database, metadata, and generated files in its app data.
+releaseNotes: Initial Umbrel custom-app package.
+developer: Stash community
+website: https://stashapp.cc
+dependencies: []
+repo: https://github.com/stashapp/stash
+support: https://github.com/stashapp/stash/issues
+port: 9999
+path: ""
+gallery: []
+defaultUsername: ""
+defaultPassword: ""
+icon: https://raw.githubusercontent.com/desantesway/umbrel-custom-apps/main/custom-apps-stash/icon.png

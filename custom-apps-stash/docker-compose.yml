@@ -1,0 +1,35 @@
+version: "3.7"
+services:
+  app_proxy:
+    image: getumbrel/app-proxy:1.0.0
+    restart: on-failure
+    environment:
+      APP_HOST: custom-apps-stash_server_1
+      APP_PORT: "9999"
+
+  server:
+    image: stashapp/stash:latest
+    restart: unless-stopped
+    stop_grace_period: 1m
+    ports:
+      - "9999:9999"
+    environment:
+      STASH_STASH: /data/
+      STASH_GENERATED: /generated/
+      STASH_METADATA: /metadata/
+      STASH_CACHE: /cache/
+      STASH_PORT: "9999"
+      TZ: Europe/Lisbon
+    volumes:
+      - ${APP_DATA_DIR}/config:/root/.stash
+      - ${APP_DATA_DIR}/data:/data
+      - ${APP_DATA_DIR}/metadata:/metadata
+      - ${APP_DATA_DIR}/cache:/cache
+      - ${APP_DATA_DIR}/blobs:/blobs
+      - ${APP_DATA_DIR}/generated:/generated
+      - type: bind
+        source: "/home/umbrel/umbrel/external/TOSHIBA HDW/Vault/Unlocked"
+        target: /media
+        read_only: true
+        bind:
+          propagation: rshared
